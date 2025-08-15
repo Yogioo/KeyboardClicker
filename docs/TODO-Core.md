@@ -148,15 +148,15 @@
 ## 测试要求
 
 ### 单元测试覆盖率
-- [x] GridCalculator: 100%
-- [x] InputProcessor: 100%  
-- [x] CommandExecutor: 100%
-- [x] GridCoordinateSystem: 100%
+- [ ] GridCalculator: 100%
+- [ ] InputProcessor: 100%  
+- [ ] CommandExecutor: 100%
+- [ ] GridCoordinateSystem: 100%
 
 ### 集成测试
-- [x] 完整操作流程测试
-- [x] 边界条件测试
-- [x] 异常情况测试
+- [ ] 完整操作流程测试
+- [ ] 边界条件测试
+- [ ] 异常情况测试
 
 ---
 
