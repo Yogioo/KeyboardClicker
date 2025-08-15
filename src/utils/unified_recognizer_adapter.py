@@ -21,7 +21,7 @@ class UnifiedRecognizerAdapter:
         """初始化适配器"""
         # 初始化统一识别器
         self._config = UnifiedRecognitionConfig()
-        self._config.LoadBalancedConfig()  # 使用平衡配置
+        self._config.LoadFastConfig()  # 使用快速配置以提升性能
         
         self._recognizer = UnifiedVisualRecognizer(self._config)
         

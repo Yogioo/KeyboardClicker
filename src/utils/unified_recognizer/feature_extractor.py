@@ -64,6 +64,80 @@ class FeatureExtractor:
             self._logger.error(f"提取统一特征失败: {e}")
             return []
     
+    def ExtractLevelFeatures(self, level: int, level_features: Dict[str, np.ndarray]) -> List[Dict[str, Any]]:
+        """
+        提取单个金字塔层级的特征（用于并行处理）
+        
+        Args:
+            level: 金字塔层级
+            level_features: 该层级的特征字典
+            
+        Returns:
+            该层级的特征向量列表
+        """
+        try:
+            # 对于非第0层，使用简化的区域分割
+            if level == 0:
+                regions = self._SegmentRegions(level_features)
+            else:
+                # 对于其他层级，使用更简单的分割策略
+                regions = self._SegmentRegionsSimple(level_features)
+            
+            level_features_list = []
+            pyramid_features = {level: level_features}  # 构造单层金字塔
+            
+            for region in regions:
+                feature_vector = self._ExtractRegionFeatures(region, pyramid_features)
+                if feature_vector:
+                    feature_vector['pyramid_level'] = level  # 添加层级信息
+                    level_features_list.append(feature_vector)
+            
+            return level_features_list
+            
+        except Exception as e:
+            self._logger.error(f"提取层级{level}特征失败: {e}")
+            return []
+    
+    def _SegmentRegionsSimple(self, level_features: Dict[str, np.ndarray]) -> List[Any]:
+        """
+        简化的区域分割（用于非第0层）
+        
+        Args:
+            level_features: 单层特征字典
+            
+        Returns:
+            候选区域列表
+        """
+        try:
+            regions = []
+            
+            # 使用边缘图进行简化分割
+            edges = level_features.get('edges')
+            if edges is None:
+                return regions
+            
+            # 寻找轮廓
+            contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            for contour in contours:
+                area = cv2.contourArea(contour)
+                if self._min_area <= area <= self._max_area:
+                    x, y, w, h = cv2.boundingRect(contour)
+                    
+                    region = {
+                        'contour': contour,
+                        'bbox': (x, y, w, h),
+                        'area': area,
+                        'centroid': self._GetCentroid(contour)
+                    }
+                    regions.append(region)
+            
+            return regions
+            
+        except Exception as e:
+            self._logger.error(f"简化区域分割失败: {e}")
+            return []
+    
     def _SegmentRegions(self, level_features: Dict[str, np.ndarray]) -> List[Any]:
         """
         区域分割 - 统一找出所有候选区域

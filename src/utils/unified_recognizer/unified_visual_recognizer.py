@@ -18,6 +18,8 @@ from .image_pyramid import ImagePyramid
 from .feature_extractor import FeatureExtractor
 from .element_classifier import ElementClassifier
 from .spatial_analyzer import SpatialAnalyzer
+from .roi_detector import ROIDetector
+from .advanced_cache import AdvancedCache
 
 class FeatureCache:
     """多层特征缓存"""
@@ -31,8 +33,11 @@ class FeatureCache:
     
     def _GetImageHash(self, image: np.ndarray) -> str:
         """计算图像哈希值"""
-        # 对图像进行快速哈希
-        small_image = cv2.resize(image, (32, 32))
+        # 对图像进行快速哈希，使用更小的尺寸提升速度
+        small_image = cv2.resize(image, (16, 16))
+        # 转换为灰度图进一步减少计算量
+        if len(small_image.shape) == 3:
+            small_image = cv2.cvtColor(small_image, cv2.COLOR_BGR2GRAY)
         image_bytes = small_image.tobytes()
         return hashlib.md5(image_bytes).hexdigest()
     
@@ -118,17 +123,34 @@ class UnifiedVisualRecognizer:
         # 初始化子模块
         self._InitializeModules()
         
-        # 初始化缓存
+        # 初始化高级缓存系统
         self._cache = None
         if self._config.performance.enable_caching:
-            self._cache = FeatureCache(self._config.performance.max_cache_size)
+            self._cache = AdvancedCache(
+                max_size=self._config.performance.max_cache_size,
+                max_memory_mb=min(512, self._config.performance.max_cache_size * 2),  # 动态内存限制
+                ttl_seconds=3600,  # 1小时TTL
+                enable_memory_monitoring=True
+            )
+        
+        # 初始化ROI检测器
+        self._roi_detector = None
+        if self._config.performance.enable_roi_detection:
+            self._roi_detector = ROIDetector(
+                change_threshold=self._config.performance.roi_change_threshold,
+                min_roi_size=self._config.performance.roi_min_size,
+                max_roi_count=self._config.performance.roi_max_count,
+                merge_distance=self._config.performance.roi_merge_distance
+            )
         
         # 性能统计
         self._performance_stats = {
             'total_recognitions': 0,
             'cache_hits': 0,
+            'roi_hits': 0,
             'average_time': 0.0,
-            'last_recognition_time': 0.0
+            'last_recognition_time': 0.0,
+            'average_roi_coverage': 0.0
         }
         
         self._logger.info("统一视觉识别器初始化完成")
@@ -192,56 +214,139 @@ class UnifiedVisualRecognizer:
             
             # 检查缓存
             if self._cache:
-                cached_results = self._cache.GetCachedResults(image)
+                cached_results = self._cache.get_cached_results(image)
                 if cached_results is not None:
                     self._performance_stats['cache_hits'] += 1
                     self._logger.info("使用缓存结果")
                     return cached_results
             
+            # ROI检测优化
+            if self._roi_detector:
+                rois = self._roi_detector.DetectROI(image)
+                if not rois:  # 没有变化，返回空结果
+                    self._logger.info("未检测到屏幕变化，跳过处理")
+                    return []
+                
+                # 如果ROI覆盖面积较小，使用ROI处理
+                total_area = image.shape[0] * image.shape[1]
+                roi_area = sum(w * h for _, _, w, h in rois)
+                roi_coverage = roi_area / total_area
+                
+                if roi_coverage < 0.7 and len(rois) <= 5:  # ROI优化阈值
+                    self._performance_stats['roi_hits'] += 1
+                    self._performance_stats['average_roi_coverage'] = (
+                        (self._performance_stats['average_roi_coverage'] * (self._performance_stats['roi_hits'] - 1) + roi_coverage) / 
+                        self._performance_stats['roi_hits']
+                    )
+                    return self._ProcessROIs(image, rois)
+            
+            # 全屏处理流程
+            return self._ProcessFullScreen(image, start_time)
+            
+        except Exception as e:
+            self._logger.error(f"检测失败: {e}")
+            return []
+    
+    def _ProcessROIs(self, image: np.ndarray, rois: List[Tuple[int, int, int, int]]) -> List[Dict[str, Any]]:
+        """处理ROI区域"""
+        all_results = []
+        
+        for roi in rois:
+            x, y, w, h = roi
+            
+            # 提取ROI图像
+            roi_image = self._roi_detector.ExtractROIImage(image, roi)
+            if roi_image.size == 0:
+                continue
+            
+            # 对ROI进行识别
+            roi_results = self._ProcessSingleROI(roi_image, x, y)
+            
+            # 调整坐标到全图坐标系
+            for result in roi_results:
+                if 'bbox' in result:
+                    bbox = result['bbox']
+                    result['bbox'] = (bbox[0] + x, bbox[1] + y, bbox[2], bbox[3])
+            
+            all_results.extend(roi_results)
+        
+        # 对所有结果进行空间关系优化
+        if all_results:
+            all_results = self._spatial_analyzer.OptimizeSpatialRelationships(all_results)
+            all_results = self._PostProcessResults(all_results)
+        
+        self._logger.info(f"ROI处理完成: {len(rois)}个区域，检测到{len(all_results)}个元素")
+        return all_results
+    
+    def _ProcessSingleROI(self, roi_image: np.ndarray, offset_x: int, offset_y: int) -> List[Dict[str, Any]]:
+        """处理单个ROI区域"""
+        try:
             # 1. 构建图像金字塔
-            pyramid = self._BuildPyramidWithCache(image)
+            pyramid = self._pyramid_processor.BuildPyramid(roi_image)
             if not pyramid:
-                self._logger.error("构建金字塔失败")
                 return []
             
             # 2. 提取基础特征
             pyramid_features = self._pyramid_processor.ExtractBaseFeatures(pyramid)
             if not pyramid_features:
-                self._logger.error("提取基础特征失败")
                 return []
             
             # 3. 提取统一特征
-            unified_features = self._ExtractUnifiedFeaturesParallel(pyramid_features)
+            unified_features = self._feature_extractor.ExtractUnifiedFeatures(pyramid_features)
             if not unified_features:
-                self._logger.info("未检测到有效特征")
                 return []
             
             # 4. 元素分类
             classified_elements = self._classifier.ClassifyElements(unified_features)
-            if not classified_elements:
-                self._logger.info("未分类出任何元素")
-                return []
             
-            # 5. 空间关系优化
-            final_results = self._spatial_analyzer.OptimizeSpatialRelationships(classified_elements)
-            
-            # 6. 后处理
-            final_results = self._PostProcessResults(final_results)
-            
-            # 缓存结果
-            if self._cache:
-                self._cache.CacheResults(image, final_results)
-            
-            # 更新性能统计
-            recognition_time = time.time() - start_time
-            self._UpdatePerformanceStats(recognition_time)
-            
-            self._logger.info(f"识别完成: 检测到{len(final_results)}个元素，耗时{recognition_time:.3f}秒")
-            return final_results
+            return classified_elements
             
         except Exception as e:
-            self._logger.error(f"检测失败: {e}")
+            self._logger.warning(f"ROI处理失败 ({offset_x}, {offset_y}): {e}")
             return []
+    
+    def _ProcessFullScreen(self, image: np.ndarray, start_time: float) -> List[Dict[str, Any]]:
+        """全屏处理流程"""
+        # 1. 构建图像金字塔
+        pyramid = self._BuildPyramidWithCache(image)
+        if not pyramid:
+            self._logger.error("构建金字塔失败")
+            return []
+        
+        # 2. 提取基础特征
+        pyramid_features = self._pyramid_processor.ExtractBaseFeatures(pyramid)
+        if not pyramid_features:
+            self._logger.error("提取基础特征失败")
+            return []
+        
+        # 3. 提取统一特征
+        unified_features = self._ExtractUnifiedFeaturesParallel(pyramid_features)
+        if not unified_features:
+            self._logger.info("未检测到有效特征")
+            return []
+        
+        # 4. 元素分类
+        classified_elements = self._classifier.ClassifyElements(unified_features)
+        if not classified_elements:
+            self._logger.info("未分类出任何元素")
+            return []
+        
+        # 5. 空间关系优化
+        final_results = self._spatial_analyzer.OptimizeSpatialRelationships(classified_elements)
+        
+        # 6. 后处理
+        final_results = self._PostProcessResults(final_results)
+        
+        # 缓存结果
+        if self._cache:
+            self._cache.cache_results(image, final_results)
+        
+        # 更新性能统计
+        recognition_time = time.time() - start_time
+        self._UpdatePerformanceStats(recognition_time)
+        
+        self._logger.info(f"全屏识别完成: 检测到{len(final_results)}个元素，耗时{recognition_time:.3f}秒")
+        return final_results
     
     def DetectSingleType(self, element_type: str, image: np.ndarray) -> List[Dict[str, Any]]:
         """
@@ -301,14 +406,14 @@ class UnifiedVisualRecognizer:
     def _BuildPyramidWithCache(self, image: np.ndarray) -> List[np.ndarray]:
         """带缓存的金字塔构建"""
         if self._cache:
-            cached_pyramid = self._cache.GetCachedPyramid(image)
+            cached_pyramid = self._cache.get_cached_pyramid(image)
             if cached_pyramid is not None:
                 return cached_pyramid
         
         pyramid = self._pyramid_processor.BuildPyramid(image)
         
         if self._cache and pyramid:
-            self._cache.CachePyramid(image, pyramid)
+            self._cache.cache_pyramid(image, pyramid)
         
         return pyramid
     
@@ -319,10 +424,34 @@ class UnifiedVisualRecognizer:
         
         try:
             max_workers = min(self._config.performance.max_threads, 4)
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                # 这里可以进一步并行化特征提取过程
-                # 目前简化处理，直接调用单线程版本
+            
+            # 如果金字塔层数较少，直接使用单线程
+            if len(pyramid_features) <= 2:
                 return self._feature_extractor.ExtractUnifiedFeatures(pyramid_features)
+            
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # 按金字塔层级并行处理特征提取
+                futures = {}
+                for level, features in pyramid_features.items():
+                    future = executor.submit(self._feature_extractor.ExtractLevelFeatures, level, features)
+                    futures[level] = future
+                
+                # 收集结果
+                level_results = {}
+                for level, future in futures.items():
+                    try:
+                        level_results[level] = future.result(timeout=10)  # 10秒超时
+                    except Exception as e:
+                        self._logger.warning(f"层级{level}特征提取失败: {e}")
+                        level_results[level] = []
+                
+                # 合并所有层级的结果
+                all_features = []
+                for level in sorted(level_results.keys()):
+                    all_features.extend(level_results[level])
+                
+                return all_features
+                
         except Exception as e:
             self._logger.error(f"并行特征提取失败，回退到单线程: {e}")
             return self._feature_extractor.ExtractUnifiedFeatures(pyramid_features)
@@ -408,6 +537,20 @@ class UnifiedVisualRecognizer:
             if stats['total_recognitions'] > 0:
                 cache_hit_rate = stats['cache_hits'] / stats['total_recognitions']
             stats['cache_hit_rate'] = cache_hit_rate
+            
+            # 添加高级缓存的详细统计
+            cache_stats = self._cache.get_stats()
+            stats.update({
+                'cache_pyramid_hits': cache_stats.pyramid_hits,
+                'cache_pyramid_misses': cache_stats.pyramid_misses,
+                'cache_feature_hits': cache_stats.feature_hits,
+                'cache_feature_misses': cache_stats.feature_misses,
+                'cache_result_hits': cache_stats.result_hits,
+                'cache_result_misses': cache_stats.result_misses,
+                'cache_evictions': cache_stats.evictions,
+                'cache_memory_usage_mb': cache_stats.memory_usage_mb,
+                'cache_total_entries': cache_stats.total_entries
+            })
         else:
             stats['cache_hit_rate'] = 0.0
         
@@ -416,7 +559,7 @@ class UnifiedVisualRecognizer:
     def ClearCache(self):
         """清空缓存"""
         if self._cache:
-            self._cache.Clear()
+            self._cache.clear()
             self._logger.info("缓存已清空")
     
     def ResetPerformanceStats(self):

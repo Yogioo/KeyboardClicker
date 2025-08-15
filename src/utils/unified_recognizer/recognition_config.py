@@ -58,6 +58,14 @@ class PerformanceConfig:
     parallel_feature_extraction: bool = True
     max_threads: int = 4
     memory_limit_mb: int = 512
+    
+    # ROI检测配置
+    enable_roi_detection: bool = True
+    roi_change_threshold: float = 0.05
+    roi_min_size: int = 50
+    roi_max_count: int = 8
+    roi_merge_distance: int = 30
+    roi_coverage_threshold: float = 0.7
 
 class UnifiedRecognitionConfig:
     """统一识别配置管理器"""
@@ -242,28 +250,78 @@ class UnifiedRecognitionConfig:
     def SetMaxThreads(self, threads: int):
         """设置最大线程数"""
         self.performance.max_threads = threads
+    
+    def EnableROIDetection(self, enabled: bool):
+        """启用或禁用ROI检测"""
+        self.performance.enable_roi_detection = enabled
+    
+    def SetROIChangeThreshold(self, threshold: float):
+        """设置ROI变化检测阈值"""
+        self.performance.roi_change_threshold = max(0.01, min(1.0, threshold))
+    
+    def SetROIMinSize(self, size: int):
+        """设置ROI最小尺寸"""
+        self.performance.roi_min_size = max(10, size)
+    
+    def SetROIMaxCount(self, count: int):
+        """设置最大ROI数量"""
+        self.performance.roi_max_count = max(1, min(20, count))
+    
+    def SetROIMergeDistance(self, distance: int):
+        """设置ROI合并距离"""
+        self.performance.roi_merge_distance = max(5, distance)
+    
+    def SetROICoverageThreshold(self, threshold: float):
+        """设置ROI覆盖阈值"""
+        self.performance.roi_coverage_threshold = max(0.1, min(1.0, threshold))
     #endregion
     
     #region 预设配置
     def LoadFastConfig(self):
         """加载快速识别配置"""
-        self.pyramid.levels = 3
-        self.pyramid.scale_factor = 0.6
-        self.segmentation.min_region_area = 100
-        self.segmentation.max_region_area = 50000
-        self.performance.parallel_feature_extraction = True
-        self.performance.max_threads = 4
+        # 金字塔配置 - 大幅减少层数和增大缩放因子以提高速度
+        self.pyramid.levels = 1  # 只使用单层，避免多层处理开销
+        self.pyramid.scale_factor = 0.8  # 更大的缩放因子
+        self.pyramid.min_size = 64  # 进一步增大最小尺寸
         
-        # 降低阈值以提高速度
+        # 分割配置 - 大幅增大最小区域面积以减少候选区域
+        self.segmentation.min_region_area = 300  # 大幅增加最小区域
+        self.segmentation.max_region_area = 30000  # 减少最大区域
+        self.segmentation.edge_threshold_low = 80  # 更高的边缘阈值
+        self.segmentation.edge_threshold_high = 200
+        self.segmentation.morphology_kernel_size = 1  # 最小核大小
+        
+        # 性能配置 - 禁用并行处理以避免开销
+        self.performance.parallel_feature_extraction = False  # 禁用并行处理
+        self.performance.max_threads = 1  # 单线程处理
+        self.performance.enable_caching = True
+        self.performance.max_cache_size = 50  # 减小缓存以节省内存
+        self.performance.memory_limit_mb = 128  # 更严格的内存限制
+        
+        # 空间配置 - 大幅放宽约束以减少计算
+        self.spatial.overlap_threshold = 0.5  # 更大的重叠阈值
+        self.spatial.semantic_distance_threshold = 80  # 增大距离阈值
+        self.spatial.density_check_radius = 60  # 减小检查半径
+        self.spatial.max_nearby_elements = 5  # 大幅减少最大邻近元素数
+        
+        # 大幅降低分类阈值以快速通过
         self.classification.thresholds = {
-            'button': 0.35,
-            'icon': 0.3,
-            'text': 0.25,
-            'link': 0.3,
-            'input': 0.35
+            'button': 0.15,  # 更低的阈值
+            'icon': 0.1,
+            'text': 0.05,
+            'link': 0.1,
+            'input': 0.15
         }
         
-        self._logger.info("已加载快速识别配置")
+        # ROI检测配置 - 启用以提高速度
+        self.performance.enable_roi_detection = True
+        self.performance.roi_change_threshold = 0.1  # 更高的变化阈值，减少ROI数量
+        self.performance.roi_min_size = 100  # 更大的最小ROI尺寸
+        self.performance.roi_max_count = 4  # 减少最大ROI数量
+        self.performance.roi_merge_distance = 50  # 增大合并距离
+        self.performance.roi_coverage_threshold = 0.8  # 更高的覆盖阈值
+        
+        self._logger.info("已加载极速识别配置")
     
     def LoadAccurateConfig(self):
         """加载精确识别配置"""
@@ -281,6 +339,14 @@ class UnifiedRecognitionConfig:
             'link': 0.45,
             'input': 0.5
         }
+        
+        # ROI检测配置 - 精确模式
+        self.performance.enable_roi_detection = True
+        self.performance.roi_change_threshold = 0.02  # 更低的变化阈值，检测更细微变化
+        self.performance.roi_min_size = 30  # 更小的最小ROI尺寸
+        self.performance.roi_max_count = 12  # 更多的ROI数量
+        self.performance.roi_merge_distance = 20  # 更小的合并距离
+        self.performance.roi_coverage_threshold = 0.5  # 更低的覆盖阈值
         
         self._logger.info("已加载精确识别配置")
     
@@ -336,6 +402,22 @@ class UnifiedRecognitionConfig:
         
         if self.performance.max_threads <= 0:
             errors.append("最大线程数必须大于0")
+        
+        # 验证ROI检测配置
+        if self.performance.roi_change_threshold < 0.01 or self.performance.roi_change_threshold > 1.0:
+            errors.append("ROI变化阈值必须在0.01-1.0之间")
+        
+        if self.performance.roi_min_size < 10:
+            errors.append("ROI最小尺寸不能小于10像素")
+        
+        if self.performance.roi_max_count < 1 or self.performance.roi_max_count > 20:
+            errors.append("ROI最大数量必须在1-20之间")
+        
+        if self.performance.roi_merge_distance < 5:
+            errors.append("ROI合并距离不能小于5像素")
+        
+        if self.performance.roi_coverage_threshold < 0.1 or self.performance.roi_coverage_threshold > 1.0:
+            errors.append("ROI覆盖阈值必须在0.1-1.0之间")
         
         return errors
     
