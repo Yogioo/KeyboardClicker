@@ -16,7 +16,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 from src.utils.fast_visual_recognizer import FastVisualRecognizer
 from src.utils.screenshot import ScreenshotTool
 from src.utils.screen_labeler import ScreenLabeler
-from src.utils.bounding_box_overlay import BoundingBoxOverlay
+from src.utils.optimized_bbox_overlay import OptimizedBoundingBoxOverlay
 from src.utils.detection_config import detection_config
 
 class FastLabelIntegrator:
@@ -28,7 +28,7 @@ class FastLabelIntegrator:
         self._recognizer = FastVisualRecognizer()
         self._screenshot_tool = ScreenshotTool()
         self._labeler = ScreenLabeler()
-        self._bbox_overlay = BoundingBoxOverlay()
+        self._bbox_overlay = OptimizedBoundingBoxOverlay()
         
         # 当前识别结果和标签映射
         self._current_detections = []
@@ -104,14 +104,15 @@ class FastLabelIntegrator:
                             include_types: Optional[List[str]] = None) -> bool:
         """截图并快速识别可点击元素"""
         try:
-            start_time = time.time()
+            total_start_time = time.time()
+            print(f"\n=== 开始性能计时分析 ===")
             
-            # 1. 截图
+            # 1. 截图计时
+            screenshot_start = time.time()
             if region is None:
                 # 全屏截图
                 if save_screenshot:
                     screenshot_path = self._screenshot_tool.capture_and_save_full_screen("fast_recognition.png")
-                    print(f"[截图] 全屏截图已保存: {screenshot_path}")
                 else:
                     screenshot = self._screenshot_tool.capture_full_screen()
                     screenshot_path = None
@@ -122,18 +123,24 @@ class FastLabelIntegrator:
                     screenshot_path = self._screenshot_tool.capture_and_save_region(
                         x, y, width, height, "fast_region.png"
                     )
-                    print(f"[截图] 区域截图已保存: {screenshot_path}")
                 else:
                     screenshot = self._screenshot_tool.capture_region(x, y, width, height)
                     screenshot_path = None
             
-            # 2. 快速识别可点击元素
+            screenshot_time = time.time() - screenshot_start
+            print(f"[计时] 截图耗时: {screenshot_time:.3f} 秒")
+            
+            # 2. 快速识别可点击元素计时
+            detection_start = time.time()
             if save_screenshot and screenshot_path:
                 elements = self._recognizer.detect_clickable_elements(screenshot_path, include_types)
             else:
                 elements = self._recognizer.detect_clickable_elements(screenshot, include_types)
+            detection_time = time.time() - detection_start
+            print(f"[计时] 元素检测耗时: {detection_time:.3f} 秒")
             
-            # 3. 调整坐标（如果是区域截图）
+            # 3. 坐标调整计时
+            adjustment_start = time.time()
             if region is not None:
                 offset_x, offset_y = region[0], region[1]
                 for element in elements:
@@ -142,11 +149,21 @@ class FastLabelIntegrator:
                     # 更新bbox
                     x, y, w, h = element['bbox']
                     element['bbox'] = (x + offset_x, y + offset_y, w, h)
+            adjustment_time = time.time() - adjustment_start
+            print(f"[计时] 坐标调整耗时: {adjustment_time:.3f} 秒")
             
             self._current_detections = elements
-            elapsed_time = time.time() - start_time
+            total_time = time.time() - total_start_time
             
-            print(f"[识别] 优化后的快速识别完成：发现 {len(elements)} 个可点击元素，耗时 {elapsed_time:.2f} 秒")
+            # 输出详细性能报告
+            print(f"\n=== 性能分析报告 ===")
+            print(f"总耗时: {total_time:.3f} 秒")
+            print(f"  - 截图: {screenshot_time:.3f} 秒 ({screenshot_time/total_time*100:.1f}%)")
+            print(f"  - 检测: {detection_time:.3f} 秒 ({detection_time/total_time*100:.1f}%)")
+            print(f"  - 调整: {adjustment_time:.3f} 秒 ({adjustment_time/total_time*100:.1f}%)")
+            print(f"检测结果: {len(elements)} 个可点击元素")
+            if len(elements) > 0:
+                print(f"平均每个元素检测耗时: {(detection_time/len(elements)*1000):.2f} 毫秒")
             
             return len(elements) > 0
             
@@ -162,25 +179,44 @@ class FastLabelIntegrator:
                 self._on_error("没有识别结果，请先执行快速识别")
                 return False
             
-            print(f"[边界框] 显示 {len(self._current_detections)} 个元素的边界框（优化后）")
+            bbox_start = time.time()
+            print(f"\n=== 边界框显示性能计时 ===")
+            print(f"[边界框] 准备显示 {len(self._current_detections)} 个元素的边界框")
             
-            # 转换为边界框格式
+            # 数据转换计时
+            conversion_start = time.time()
             detections_for_bbox = []
             for detection in self._current_detections:
                 detections_for_bbox.append({
                     'bbox': detection['bbox'],
                     'text': f"{detection['type']} ({detection['confidence']:.2f})"
                 })
+            conversion_time = time.time() - conversion_start
+            print(f"[计时] 数据转换耗时: {conversion_time:.3f} 秒")
             
-            # 显示边界框
-            self._bbox_overlay.ShowBoundingBoxes(
+            # 渲染计时
+            render_start = time.time()
+            success = self._bbox_overlay.ShowBoundingBoxes(
                 detections_for_bbox, 
                 duration=duration,
                 box_color=box_color,
                 box_width=box_width
             )
+            render_time = time.time() - render_start
+            print(f"[计时] 边界框渲染耗时: {render_time:.3f} 秒")
             
-            return True
+            total_bbox_time = time.time() - bbox_start
+            print(f"\n=== 边界框性能报告 ===")
+            print(f"边界框总耗时: {total_bbox_time:.3f} 秒")
+            print(f"  - 数据转换: {conversion_time:.3f} 秒 ({conversion_time/total_bbox_time*100:.1f}%)")
+            print(f"  - 渲染显示: {render_time:.3f} 秒 ({render_time/total_bbox_time*100:.1f}%)")
+            print(f"平均每个边界框渲染: {(render_time/len(self._current_detections)*1000):.3f} 毫秒")
+            
+            # 计算吞吐量
+            throughput = len(self._current_detections) / render_time
+            print(f"边界框渲染吞吐量: {throughput:.1f} 个/秒")
+            
+            return success
             
         except Exception as e:
             self._on_error(f"显示边界框失败: {e}")
@@ -249,8 +285,8 @@ class FastLabelIntegrator:
                          include_types: Optional[List[str]] = None) -> bool:
         """一键分析：截图 => 快速识别 => 显示标签"""
         try:
-            print(f"\n🚀 === 开始优化后的快速视觉识别流程 ===")
-            print("✨ 使用优化的计算机视觉算法，无需OCR，高精度识别可点击元素")
+            print(f"\n=== 开始优化后的快速视觉识别流程 ===")
+            print("使用优化的计算机视觉算法，无需OCR，高精度识别可点击元素")
             
             # 1. 截图并识别
             if not self.capture_and_recognize(region=region, include_types=include_types):
@@ -269,7 +305,7 @@ class FastLabelIntegrator:
                 return False
             
             # 4. 输出结果摘要
-            print(f"\n✅ === 优化后的快速识别完成 ===")
+            print(f"\n=== 优化后的快速识别完成 ===")
             print(f"识别结果: {len(self._current_detections)} 个可点击元素")
             
             # 统计各类型元素数量

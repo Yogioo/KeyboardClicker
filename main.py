@@ -11,7 +11,7 @@ from src.utils.fast_label_integrator import FastLabelIntegrator
 from src.gui.debug_config_gui import DebugConfigGUI
 from src.utils.detection_config import detection_config
 from src.utils.fast_visual_recognizer import FastVisualRecognizer
-from src.utils.bounding_box_overlay import BoundingBoxOverlay
+from src.utils.optimized_bbox_overlay import OptimizedBoundingBoxOverlay
 from src.utils.screenshot import ScreenshotTool
 
 class SimpleKeyboardClickerApp:
@@ -29,8 +29,8 @@ class SimpleKeyboardClickerApp:
         self.recognizer.set_recognition_callback(self._on_recognition_result)
         self.recognizer.set_error_callback(self._on_recognition_error)
         
-        # 初始化边界框覆盖层和截图工具
-        self.bbox_overlay = BoundingBoxOverlay()
+        # 初始化边界框覆盖层和截图工具  
+        self.bbox_overlay = OptimizedBoundingBoxOverlay()
         self.screenshot_tool = ScreenshotTool()
         
         # 创建GUI
@@ -233,30 +233,75 @@ class SimpleKeyboardClickerApp:
     def _debug_detect(self):
         """执行调试检测"""
         try:
+            import time
+            total_operation_start = time.time()
+            
             mode = self.debug_mode_var.get()
+            print(f"\n{'='*60}")
+            print(f"开始调试检测流程 - 模式: {mode}")
+            print(f"{'='*60}")
+            
             self._update_status("正在截图并执行调试检测...", "orange")
             
-            # 先截图
+            # 截图阶段计时
+            screenshot_start = time.time()
+            print("=== 调试检测：开始截图 ===")
             screenshot = self.screenshot_tool.capture_full_screen()
+            screenshot_time = time.time() - screenshot_start
+            print(f"=== 调试检测：截图耗时 {screenshot_time:.3f} 秒 ===")
+            
             if screenshot is None:
                 self._update_status("截图失败", "red")
                 messagebox.showerror("错误", "截图失败，无法进行检测")
                 return
             
+            # 检测阶段计时
+            detection_start = time.time()
+            print(f"=== 调试检测：开始{mode}模式检测 ===")
+            
             if mode == "normal":
                 # 正常模式：检测所有启用的类型
                 elements = self.recognizer.detect_clickable_elements(screenshot)
-                self._show_debug_results(elements, "正常模式检测", screenshot)
+                detection_type = "正常模式检测"
             else:
                 # 单独检测模式
                 elements = self.recognizer.detect_single_type(mode, screenshot)
-                self._show_debug_results(elements, f"单独{mode}检测", screenshot)
+                detection_type = f"单独{mode}检测"
+            
+            detection_time = time.time() - detection_start
+            print(f"=== 调试检测：检测阶段耗时 {detection_time:.3f} 秒 ===")
+            print(f"=== 调试检测：检测到 {len(elements)} 个元素 ===")
+            
+            # 结果显示阶段计时
+            display_start = time.time()
+            print("=== 调试检测：开始显示结果 ===")
+            self._show_debug_results(elements, detection_type, screenshot, {
+                'screenshot_time': screenshot_time,
+                'detection_time': detection_time,
+                'total_elements': len(elements),
+                'mode': mode
+            })
+            display_time = time.time() - display_start
+            print(f"=== 调试检测：结果显示耗时 {display_time:.3f} 秒 ===")
+            
+            # 总体性能报告
+            total_operation_time = time.time() - total_operation_start
+            print(f"\n{'='*60}")
+            print(f"调试检测性能报告 - {mode}模式")
+            print(f"{'='*60}")
+            print(f"总耗时: {total_operation_time:.3f} 秒")
+            print(f"  - 截图: {screenshot_time:.3f} 秒 ({screenshot_time/total_operation_time*100:.1f}%)")
+            print(f"  - 检测: {detection_time:.3f} 秒 ({detection_time/total_operation_time*100:.1f}%)")
+            print(f"  - 结果显示: {display_time:.3f} 秒 ({display_time/total_operation_time*100:.1f}%)")
+            if len(elements) > 0:
+                print(f"检测效率: {len(elements)/detection_time:.1f} 个元素/秒")
+            print(f"{'='*60}")
                 
         except Exception as e:
             self._update_status(f"调试检测失败: {e}", "red")
             messagebox.showerror("错误", f"调试检测失败: {e}")
     
-    def _show_debug_results(self, elements, title, screenshot=None):
+    def _show_debug_results(self, elements, title, screenshot=None, performance_data=None):
         """显示调试检测结果（可视化）"""
         if not elements:
             self._update_status("未检测到任何元素", "orange")
@@ -321,6 +366,21 @@ class SimpleKeyboardClickerApp:
         # 显示检测结果
         result_text = f"{title}\n" + "="*50 + "\n\n"
         result_text += f"检测到 {len(elements)} 个元素:\n\n"
+        
+        # 添加性能信息
+        if performance_data:
+            result_text += "性能分析:\n" + "-"*30 + "\n"
+            if 'screenshot_time' in performance_data:
+                result_text += f"截图耗时: {performance_data['screenshot_time']:.3f} 秒\n"
+            if 'detection_time' in performance_data:
+                result_text += f"检测耗时: {performance_data['detection_time']:.3f} 秒\n"
+            if 'total_elements' in performance_data and performance_data['total_elements'] > 0:
+                if 'detection_time' in performance_data and performance_data['detection_time'] > 0:
+                    efficiency = performance_data['total_elements'] / performance_data['detection_time']
+                    result_text += f"检测效率: {efficiency:.1f} 个元素/秒\n"
+            if 'mode' in performance_data:
+                result_text += f"检测模式: {performance_data['mode']}\n"
+            result_text += "\n检测详情:\n" + "-"*30 + "\n\n"
         
         for i, element in enumerate(elements, 1):
             result_text += f"{i}. 类型: {element['type']}\n"
@@ -521,14 +581,24 @@ class SimpleKeyboardClickerApp:
     def _show_bounding_boxes(self):
         """截图全屏并显示边界框"""
         try:
+            import time
+            total_operation_start = time.time()
+            print(f"\n{'='*60}")
+            print(f"开始完整的边界框显示流程")
+            print(f"{'='*60}")
+            
             self._update_status("正在截图识别...", "orange")
             
             # 禁用按钮防止重复点击
             self.show_boxes_btn.config(state="disabled")
             self.show_labels_btn.config(state="disabled")
             
-            # 执行快速识别
-            success = self.fast_integrator.capture_and_recognize()
+            # 执行快速识别（强制启用详细计时）
+            recognition_start = time.time()
+            print("=== 主程序：开始截图识别流程 ===")
+            success = self.fast_integrator.capture_and_recognize(save_screenshot=False)
+            recognition_time = time.time() - recognition_start
+            print(f"=== 主程序：识别阶段总耗时 {recognition_time:.3f} 秒 ===")
             
             if success:
                 detections = self.fast_integrator.get_current_detections()
@@ -536,27 +606,52 @@ class SimpleKeyboardClickerApp:
                 
                 # 显示边界框
                 if len(detections) > 0:
-                    # 显示详细统计
+                    # 统计分析计时
+                    stats_start = time.time()
                     stats = self.fast_integrator.get_statistics()
-                    print(f"\n=== 识别详细统计 ===")
+                    print(f"\n=== 元素类型统计 ===")
                     if 'type_counts' in stats:
                         for elem_type, count in stats['type_counts'].items():
                             percentage = (count / stats['total_elements']) * 100 if stats['total_elements'] > 0 else 0
                             print(f"{elem_type}: {count}个 ({percentage:.1f}%)")
+                    stats_time = time.time() - stats_start
                     
+                    # 边界框显示计时
+                    bbox_display_start = time.time()
+                    print("=== 主程序：开始边界框显示 ===")
                     box_success = self.fast_integrator.show_bounding_boxes(
                         duration=None,  # 永久显示
                         box_color='red',
                         box_width=2
                     )
+                    bbox_display_time = time.time() - bbox_display_start
+                    print(f"=== 主程序：边界框显示耗时 {bbox_display_time:.3f} 秒 ===")
+                    
                     if box_success:
                         self._update_status(f"边界框已显示 ({len(detections)} 个元素)", "green")
                     else:
                         self._update_status("边界框显示失败", "red")
                 else:
                     self._update_status("未检测到可点击元素", "orange")
+                    stats_time = 0
+                    bbox_display_time = 0
             else:
                 self._update_status("识别失败", "red")
+                stats_time = 0
+                bbox_display_time = 0
+            
+            # 总体性能报告
+            total_operation_time = time.time() - total_operation_start
+            print(f"\n{'='*60}")
+            print(f"完整流程性能报告")
+            print(f"{'='*60}")
+            print(f"总耗时: {total_operation_time:.3f} 秒")
+            if success and len(detections) > 0:
+                print(f"  - 截图+识别: {recognition_time:.3f} 秒 ({recognition_time/total_operation_time*100:.1f}%)")
+                print(f"  - 统计分析: {stats_time:.3f} 秒 ({stats_time/total_operation_time*100:.1f}%)")
+                print(f"  - 边界框显示: {bbox_display_time:.3f} 秒 ({bbox_display_time/total_operation_time*100:.1f}%)")
+                print(f"处理效率: {len(detections)/total_operation_time:.1f} 个元素/秒")
+                print(f"{'='*60}")
                 
         except Exception as e:
             self._update_status(f"错误: {str(e)[:30]}...", "red")
