@@ -13,7 +13,7 @@ import tkinter as tk
 from typing import List, Dict, Optional, Callable
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
 
-from src.utils.fast_visual_recognizer import FastVisualRecognizer
+from src.utils.unified_recognizer_adapter import UnifiedRecognizerAdapter
 from src.utils.screenshot import ScreenshotTool
 from src.utils.screen_labeler import ScreenLabeler
 from src.utils.optimized_bbox_overlay import OptimizedBoundingBoxOverlay
@@ -25,7 +25,7 @@ class FastLabelIntegrator:
     def __init__(self):
         """初始化快速标签集成器"""
         # 初始化各个组件
-        self._recognizer = FastVisualRecognizer()
+        self._recognizer = UnifiedRecognizerAdapter()
         self._screenshot_tool = ScreenshotTool()
         self._labeler = ScreenLabeler()
         self._bbox_overlay = OptimizedBoundingBoxOverlay()

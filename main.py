@@ -10,7 +10,7 @@ from tkinter import ttk, messagebox
 from src.utils.fast_label_integrator import FastLabelIntegrator
 from src.gui.debug_config_gui import DebugConfigGUI
 from src.utils.detection_config import detection_config
-from src.utils.fast_visual_recognizer import FastVisualRecognizer
+from src.utils.unified_recognizer_adapter import UnifiedRecognizerAdapter
 from src.utils.optimized_bbox_overlay import OptimizedBoundingBoxOverlay
 from src.utils.screenshot import ScreenshotTool
 
@@ -24,8 +24,8 @@ class SimpleKeyboardClickerApp:
         # 初始化调试配置GUI
         self.debug_config_gui = None
         
-        # 初始化快速视觉识别器（用于单独检测）
-        self.recognizer = FastVisualRecognizer()
+        # 初始化统一视觉识别器（用于单独检测）
+        self.recognizer = UnifiedRecognizerAdapter()
         self.recognizer.set_recognition_callback(self._on_recognition_result)
         self.recognizer.set_error_callback(self._on_recognition_error)
         
