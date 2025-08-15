@@ -28,7 +28,7 @@ def test_main_components():
         
         # 测试配置
         from src.utils.detection_config import detection_config
-        detection_config.set_debug_mode(None)  # 确保调试模式正常
+        # 调试模式已移除，不需要设置
         print("[成功] 检测配置正常")
         
         # 测试快速集成器

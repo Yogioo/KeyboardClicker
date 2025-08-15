@@ -315,13 +315,8 @@ class DebugConfigGUI:
         return info_texts.get(element_type, "暂无说明")
     
     def _on_debug_mode_changed(self):
-        """调试模式改变时的回调"""
-        mode = self.debug_mode_var.get()
-        if mode == "normal":
-            self.config.set_debug_mode(None)
-        else:
-            self.config.set_debug_mode(mode)
-        
+        """调试模式改变时的回调 - 已废弃"""
+        # 调试模式功能已移除，这个方法保留为空以避免错误
         if self.on_config_changed:
             self.on_config_changed()
     

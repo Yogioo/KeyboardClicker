@@ -119,16 +119,8 @@ class DetectionConfig:
                                    # 启用后相同区域的检测结果会被缓存，提高性能
                                    # 建议：True(除非内存受限)
         
-        # ==================== 调试模式开关 ====================
-        # 用于单独测试不同类型的UI元素检测
-        self.debug_mode = True  # 调试模式总开关
-        self.detect_buttons_only = False  # 仅检测按钮
-        self.detect_links_only = False  # 仅检测链接
-        self.detect_inputs_only = False  # 仅检测输入框
-        self.detect_icons_only = False  # 仅检测图标
-        self.detect_text_only = False  # 仅检测文字区域
-        
-        # 检测类型启用开关（正常模式下使用）
+        # ==================== 检测类型启用开关 ====================
+        # 控制在正常模式下启用哪些检测类型
         self.enable_button_detection = True  # 启用按钮检测
         self.enable_link_detection = True  # 启用链接检测
         self.enable_input_detection = True  # 启用输入框检测
@@ -175,63 +167,22 @@ class DetectionConfig:
         else:
             raise ValueError(f"未知的元素类型: {element_type}")
     
-    def set_debug_mode(self, element_type: str = None):
-        """设置调试模式，只检测指定类型的元素
-        
-        Args:
-            element_type: 要单独检测的元素类型，None表示关闭调试模式
-        """
-        # 重置所有调试开关
-        self.debug_mode = False
-        self.detect_buttons_only = False
-        self.detect_links_only = False
-        self.detect_inputs_only = False
-        self.detect_icons_only = False
-        self.detect_text_only = False
-        
-        if element_type:
-            self.debug_mode = True
-            if element_type == 'button':
-                self.detect_buttons_only = True
-            elif element_type == 'link':
-                self.detect_links_only = True
-            elif element_type == 'input':
-                self.detect_inputs_only = True
-            elif element_type == 'icon':
-                self.detect_icons_only = True
-            elif element_type == 'text':
-                self.detect_text_only = True
-            else:
-                raise ValueError(f"未知的调试元素类型: {element_type}")
     
     def get_enabled_detection_types(self) -> List[str]:
         """获取当前启用的检测类型列表"""
         enabled_types = []
         
-        if self.debug_mode:
-            # 调试模式下只返回单一类型
-            if self.detect_buttons_only:
-                enabled_types.append('button')
-            elif self.detect_links_only:
-                enabled_types.append('link')
-            elif self.detect_inputs_only:
-                enabled_types.append('input')
-            elif self.detect_icons_only:
-                enabled_types.append('icon')
-            elif self.detect_text_only:
-                enabled_types.append('text')
-        else:
-            # 正常模式下返回所有启用的类型
-            if self.enable_button_detection:
-                enabled_types.append('button')
-            if self.enable_link_detection:
-                enabled_types.append('link')
-            if self.enable_input_detection:
-                enabled_types.append('input')
-            if self.enable_icon_detection:
-                enabled_types.append('icon')
-            if self.enable_text_detection:
-                enabled_types.append('text')
+        # 返回所有启用的检测类型
+        if self.enable_button_detection:
+            enabled_types.append('button')
+        if self.enable_link_detection:
+            enabled_types.append('link')
+        if self.enable_input_detection:
+            enabled_types.append('input')
+        if self.enable_icon_detection:
+            enabled_types.append('icon')
+        if self.enable_text_detection:
+            enabled_types.append('text')
         
         return enabled_types
     

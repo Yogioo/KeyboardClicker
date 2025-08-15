@@ -39,8 +39,8 @@ class FastVisualRecognizer:
         self._result_cache = {}
         self._cache_timeout = 60  # 缓存超时时间
         
-        # 调试模式
-        self._debug_mode = self._config.debug_mode
+        # 调试模式已移除
+        self._debug_mode = False
         # #endregion
         
         # 初始化检查

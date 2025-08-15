@@ -177,11 +177,7 @@ class UnifiedRecognizerAdapter:
             if include_types:
                 legacy_results = [r for r in legacy_results if r['type'] in include_types]
             
-            # 处理调试模式
-            if (self._detection_config.debug_mode and 
-                self._detection_config.debug_mode not in [None, False, 'normal']):
-                debug_type = self._detection_config.debug_mode
-                legacy_results = [r for r in legacy_results if r['type'] == debug_type]
+            # 不再需要调试模式处理，已简化
             
             if self._on_progress_callback:
                 self._on_progress_callback("检测完成", 1.0)
